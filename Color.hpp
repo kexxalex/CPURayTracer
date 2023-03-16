@@ -1,12 +1,7 @@
 #include "Vector.hpp"
 
-inline Float clamp(Float x, Float m=0, Float M=1) {
-    if (x < m)
-        return m;
-    if (x > M)
-        return M;
-    
-    return x;
+constexpr Float clamp(Float x, Float m=0, Float M=1) {
+    return std::min(std::max(x, m), M);
 }
 
 constexpr Vec3 gammaCorrect(const Vec3 &x) {

@@ -16,7 +16,7 @@ public:
     constexpr Object(const Vec3 &P, const BxDF * const M) : position(P), material(M) {}
 
     virtual bool hit(Interaction * const interaction) const = 0;
-    virtual constexpr Vec3 normalAt(const Interaction * const interaction) const = 0;
+    virtual Vec3 normalAt(const Interaction * const interaction) const = 0;
 };
 
 struct Interaction {
@@ -60,7 +60,7 @@ public:
     {}
 
     bool hit(Interaction * const interaction) const;
-    constexpr Vec3 normalAt(const Interaction * const i) const {
+    inline Vec3 normalAt(const Interaction * const i) const {
         return (corner_normals[0] * (1 - i->uv.x - i->uv.y) + corner_normals[1] * i->uv.x + corner_normals[2] * i->uv.y).normalize();
     }
 
@@ -75,7 +75,7 @@ public:
 
     bool hit(Interaction * const interaction) const;
 
-    constexpr Vec3 normalAt(const Interaction * const i) const { return (i->position - position).normalize(); }
+    inline Vec3 normalAt(const Interaction * const i) const { return (i->position - position).normalize(); }
 };
 
 class Plane : public Object {
@@ -89,5 +89,5 @@ public:
     constexpr Plane(const Vec3 &N, Float d, const BxDF * const M) : Object(N.normalize(), M), hesse_const(d / N.norm()) {}
 
     bool hit(Interaction * const interaction) const;
-    constexpr Vec3 normalAt(const Interaction * const interaction) const { return position; }
+    inline Vec3 normalAt(const Interaction * const interaction) const { return position; }
 };

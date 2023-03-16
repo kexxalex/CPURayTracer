@@ -6,25 +6,29 @@
 #include "Color.hpp"
 #include <thread>
 #include <algorithm>
+#include <mutex>
+#include <cstring>
 
-//#define USEGL
+// #define USEGL
 #ifdef USEGL
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #endif
 
 constexpr int THREADS = 12;
+constexpr int BLOCK = 32;
 std::vector<Sphere> spheres;
 std::vector<Plane> planes;
 std::vector<const Object*> objects;
 
 struct Task {
-    Ray ray;
-    Vec3* pixel;
+    int x, y;
+    int w, h;
+    Vec3* image;
 
     Task() = default;
-    Task(const Ray &ray, Vec3 * pixel_ptr) : ray(ray), pixel(pixel_ptr) {}
-    Task(const Task &t) : ray(t.ray), pixel(t.pixel) {}
+    Task(int x, int y, int w, int h, Vec3* image) : x(x), y(y), w(w), h(h), image(image) {}
+    Task(const Task &t) : x(t.x), y(t.y), w(t.w), h(t.h), image(t.image) {}
 };
 
 
@@ -52,20 +56,27 @@ void render_thread(JobList* joblist)
 {
     static const Float Inv_N = 1.0 / N;
     static const Float inv_pixel_size = 1.0 / sqrt(Float(W)*W + Float(H)*H);
+    static const Vec3 P(0, 0, -0.5);
     while (Task *task = joblist->getTask())
     {
-        Vec3 &pixel = *(task->pixel);
-        for (int n=0; n < N; n++) {
-            const Vec3 h = task->ray.direction + random_hemi_vector(task->ray.direction) * inv_pixel_size;
-            const Ray ray = Ray::NormalizedRay(task->ray.position, h);
-            pixel += Li(objects, ray);
+        for (int i=0; i < task->h; i++) {
+            for (int j=0; j < task->w; j++) {
+                Vec3 &pixel = task->image[i*W + j];
+                for (int n=0; n < N; n++) {
+                    const Vec3 receiver((j + task->x - W*0.5+0.5)/H, (H*0.5- i - task->y - 0.5)/H, 0);
+                    const Vec3 dir = (receiver-P).normalize();
+                    const Vec3 h = dir + random_hemi_vector(dir) * inv_pixel_size;
+                    const Ray ray = Ray::NormalizedRay(P, h);
+                    pixel += Li(objects, ray);
+                }
+                pixel = ACESFilm(pixel * Inv_N);
+            }
         }
-        pixel = ACESFilm(pixel * Inv_N);
     }
 }
 
 int main() {
-    planes.emplace_back(Vec3(0, 1, 0), -1, &SPECULAR_WHITE);
+    planes.emplace_back(Vec3(0, 1, 0), -1, &GROUND);
 
     //*
     for (int i=0; i < 100; i++) {
@@ -76,11 +87,11 @@ int main() {
         bool diffuse = (UniRand() < 0.5);
         spheres.emplace_back(
             Vec3(0,0,4) + u * 3, UniRand()*0.25 + 0.25,
-            diffuse ? static_cast<const BxDF*>(&DIFFUSE_WHITE) : static_cast<const BxDF*>(&SPECULAR_WHITE)
+            diffuse ? static_cast<const BxDF*>(&DIELECTRIC_WHITE) : static_cast<const BxDF*>(&DIELECTRIC_GOLD)
         );
     }
     /*/
-    spheres.emplace_back(Vec3(0,0,3), 1, &DIFFUSE_WHITE);
+    spheres.emplace_back(Vec3(0,0,3), 1, &DIELECTRIC_GOLD);
     //*/
 
     for (const Sphere& obj : spheres)
@@ -91,23 +102,27 @@ int main() {
     std::vector<Vec3> Pixels(W*H);
     JobList jobs;
 
-    const Vec3 P(0, 0, -0.5);
-    for (int i=0; i < H; i++) {
-        for (int j=0; j < W; j++) {
-            const Vec3 receiver((j-W*0.5+0.5)/H, (H*0.5-i-0.5)/H, 0);
-            const Vec3 dir = (receiver-P).normalize();
-            jobs.tasks.emplace_back(Ray(P, dir), &Pixels[i * W + j]);
+    for (int i=0; i < H; i += BLOCK) {
+        for (int j=0; j < W; j += BLOCK) {
+            int w = BLOCK, h = BLOCK;
+            if (i+w >= W)
+                w = W-i;
+            if (i+h >= H)
+                h = H-i;
+            jobs.tasks.emplace_back(j, i, w, h, &Pixels[i*W+j]);
         }
     }
 
+    #ifdef USEGL
     std::random_shuffle(jobs.tasks.begin(), jobs.tasks.end());
 
-    #ifdef USEGL
     glfwInit();
     glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
     GLFWwindow *window = glfwCreateWindow((int)(1080.0/H*W), 1080, "RT", nullptr, nullptr);
     glfwMakeContextCurrent(window);
     glewInit();
+
+    glViewport(0, 0, (int)(1080.0/H*W), 1080);
 
     glEnable(GL_TEXTURE_2D);
 
@@ -116,8 +131,8 @@ int main() {
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glBindTexture(GL_TEXTURE_2D, texture);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, W, H, 0, GL_RGB, GL_FLOAT, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
@@ -141,7 +156,7 @@ int main() {
         double t = glfwGetTime();
         if (t-lastUpdate >= 0.5) {
             lastUpdate = t;
-            int percProg = clamp(1.0 * jobs.getProgress() / W / H) * 100;
+            int percProg = clamp(1.0 * jobs.getProgress() / jobs.tasks.size()) * 100;
             glfwSetWindowTitle(window, ("RayTracer " + std::to_string(percProg)).c_str());
             glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H, GL_RGB, GL_FLOAT, Pixels.data());
         }

@@ -58,6 +58,8 @@ union Vec3 {
     constexpr Vec3(Float X, Float Y, Float Z) : x(X), y(Y), z(Z) {}
     constexpr Vec3(const Vec3 &v) : x(v.x), y(v.y), z(v.z) {}
 
+    constexpr Float max() const { return std::max(std::max(x, y), z); }
+
     constexpr Vec3 operator+(const Vec3 &v) const { return Vec3(x + v.x, y + v.y, z + v.z); }
     constexpr Vec3 operator-(const Vec3 &v) const { return Vec3(x - v.x, y - v.y, z - v.z); }
     constexpr Vec3 operator-() const { return Vec3(-x, -y, -z); }

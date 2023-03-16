@@ -7,7 +7,7 @@
 #include <thread>
 #include <algorithm>
 
-#define USEGL
+//#define USEGL
 #ifdef USEGL
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
